@@ -13,7 +13,7 @@ const MUNICIPALITIES = [
 
 const errorVariants = {
   hidden: { opacity: 0, height: 0, overflow: "hidden" },
-  visible: { opacity: 1, height: "auto", transition: { duration: 0.3, ease: "easeOut" } },
+  visible: { opacity: 1, height: "auto", transition: { duration: 0.3, ease: "easeOut" as const } },
   exit: { opacity: 0, height: 0, transition: { duration: 0.2 } },
 };
 
@@ -98,7 +98,7 @@ export const TicketForm: React.FC<TicketFormProps> = ({ isDarkMode, onSuccess })
       boxShadow: isDarkMode
         ? "0 0 0 3px rgba(59,130,246,0.12), 0 8px 32px rgba(0,0,0,0.4)"
         : "0 8px 24px -4px rgba(59,130,246,0.15)",
-      transition: { duration: 0.2, ease: "easeOut" },
+      transition: { duration: 0.2, ease: "easeOut" as const },
     },
   };
 

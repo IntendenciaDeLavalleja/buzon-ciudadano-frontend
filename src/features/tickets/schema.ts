@@ -27,7 +27,7 @@ export const ticketSchema = z.object({
       "Solo se aceptan formatos .jpg, .png y .webp"
     ),
   acceptedDataPolicy: z.literal(true, {
-    errorMap: () => ({ message: "Debe aceptar la politica de privacidad para continuar" }),
+    error: "Debe aceptar la politica de privacidad para continuar",
   }),
 });
 
