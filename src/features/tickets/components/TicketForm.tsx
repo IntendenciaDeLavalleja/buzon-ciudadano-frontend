@@ -60,7 +60,7 @@ export const TicketForm: React.FC<TicketFormProps> = ({ isDarkMode, onSuccess })
 
   const { register, handleSubmit, control, setValue, watch, reset, formState: { errors } } = useForm<TicketFormData>({
     resolver: zodResolver(ticketSchema),
-    defaultValues: { category: "camineria_rural", location: { lat: 0, lng: 0 } },
+    defaultValues: { municipality_or_destination: "Intendencia de Lavalleja", category: "camineria_rural", location: { lat: 0, lng: 0 } },
   });
 
   const location = watch("location");
@@ -130,10 +130,8 @@ export const TicketForm: React.FC<TicketFormProps> = ({ isDarkMode, onSuccess })
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
               <label className={labelClass}>Organismo</label>
-              <motion.select {...focusMotion} {...register("municipality_or_destination")} className={inputClass} defaultValue="">
-                <option value="" disabled>Seleccione...</option>
-                {MUNICIPALITIES.map((m) => <option key={m} value={m}>{m}</option>)}
-              </motion.select>
+              <input type="hidden" {...register("municipality_or_destination")} />
+              <motion.input {...focusMotion} readOnly value="Intendencia de Lavalleja" className={`${inputClass} cursor-not-allowed opacity-75`} />
               <AnimatePresence>
                 {errors.municipality_or_destination && (
                   <motion.p variants={errorVariants} initial="hidden" animate="visible" exit="exit" className={errClass}>

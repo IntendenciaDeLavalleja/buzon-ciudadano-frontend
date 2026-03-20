@@ -54,8 +54,7 @@ function App() {
                 />
               </svg>
               <p className="flex-1">
-                <span className="font-semibold">Producto preliminar en modo prueba.</span>{' '}
-                En los próximos meses podrá sufrir modificaciones visuales o de propósito.
+                <span className="font-semibold">Versión Beta</span>
               </p>
               <button
                 onClick={() => setShowBanner(false)}
