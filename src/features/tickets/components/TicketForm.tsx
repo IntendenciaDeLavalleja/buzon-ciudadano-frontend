@@ -7,10 +7,6 @@ import { ticketSchema, type TicketFormData, CATEGORY_MAPPING } from "../schema";
 import { MapModal } from "./MapModal";
 import { useCreateTicket } from "../hooks";
 
-const MUNICIPALITIES = [
-  "Intendencia de Lavalleja"
-];
-
 const errorVariants = {
   hidden: { opacity: 0, height: 0, overflow: "hidden" },
   visible: { opacity: 1, height: "auto", transition: { duration: 0.3, ease: "easeOut" as const } },
