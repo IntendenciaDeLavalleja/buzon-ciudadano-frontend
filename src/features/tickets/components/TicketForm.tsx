@@ -137,12 +137,17 @@ export const TicketForm: React.FC<TicketFormProps> = ({ isDarkMode, onSuccess })
               </AnimatePresence>
             </div>
             <div>
-              <label className={labelClass}>Categoria</label>
-              <motion.select {...focusMotion} {...register("category")} className={inputClass}>
-                {Object.entries(CATEGORY_MAPPING).map(([key, label]) => (
-                  <option key={key} value={key}>{label}</option>
-                ))}
-              </motion.select>
+              <label className={labelClass}>Categoría</label>
+              <input type="hidden" {...register("category")} />
+              <div className={`${inputClass} cursor-not-allowed opacity-75 flex items-center justify-between`}>
+                <span>Caminería Rural</span>
+                <span className={`text-[10px] font-bold uppercase tracking-widest px-2 py-0.5 rounded-full ${isDarkMode ? "bg-blue-950/60 text-blue-400" : "bg-blue-100 text-blue-700"}`}>
+                  Beta
+                </span>
+              </div>
+              <p className={`text-[11px] mt-1.5 ml-0.5 ${isDarkMode ? "text-white/25" : "text-gray-400"}`}>
+                Única categoría disponible en esta versión.
+              </p>
             </div>
           </div>
         </AnimatedSection>
