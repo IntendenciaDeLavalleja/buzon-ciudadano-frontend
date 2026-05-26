@@ -1,4 +1,5 @@
 import { motion } from 'framer-motion';
+import logoIdl from '../img/Logo.webp';
 
 type NavigationProps = {
   isDarkMode: boolean;
@@ -20,13 +21,13 @@ export function Navigation({ isDarkMode, isLowVision: _isLowVision }: Navigation
       <div className="container mx-auto px-6 py-3.5 flex justify-between items-center max-w-7xl">
         {/* Logo */}
         <div className="flex items-center gap-3 md:gap-4">
-          <span
-            className={`text-lg md:text-xl font-serif italic tracking-tight transition-colors ${
-              isDarkMode ? 'text-white' : 'text-[#1B3A6B]'
+          <img
+            src={logoIdl}
+            alt="Intendencia de Lavalleja"
+            className={`h-9 w-auto object-contain md:h-10 ${
+              isDarkMode ? 'rounded-md bg-white/90 p-1.5' : ''
             }`}
-          >
-            I.L.
-          </span>
+          />
           <div
             className={`hidden sm:block h-5 w-px transition-colors ${
               isDarkMode ? 'bg-white/10' : 'bg-[#E5E1D8]'

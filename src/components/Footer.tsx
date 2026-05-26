@@ -1,3 +1,5 @@
+import logoIdl from '../img/Logo.webp';
+
 type FooterProps = {
   isDarkMode: boolean;
   isLowVision?: boolean;
@@ -13,13 +15,21 @@ export function Footer({ isDarkMode }: FooterProps) {
       <div className="container mx-auto px-6 max-w-7xl">
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-6">
           {/* Brand */}
-          <div>
+          <div className="flex items-center gap-4">
+            <img
+              src={logoIdl}
+              alt="Intendencia de Lavalleja"
+              className={`h-11 w-auto object-contain ${
+                isDarkMode ? 'rounded-md bg-white/90 p-1.5' : ''
+              }`}
+            />
+            <div>
             <p
               className={`font-serif text-base italic transition-colors ${
                 isDarkMode ? 'text-white/50' : 'text-[#1B3A6B]/60'
               }`}
             >
-              Buzón de Caminería Rural
+              Buzón Ciudadano
             </p>
             <p
               className={`text-[9px] uppercase tracking-[0.25em] mt-1 transition-colors ${
@@ -28,6 +38,7 @@ export function Footer({ isDarkMode }: FooterProps) {
             >
               Intendencia de Lavalleja · Uruguay
             </p>
+            </div>
           </div>
 
           <p
