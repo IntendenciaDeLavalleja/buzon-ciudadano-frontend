@@ -1,6 +1,9 @@
 import { z } from "zod";
 
-const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB
+// El frontend puede aceptar imágenes de hasta 30MB para luego optimizarlas
+// (1920px / WebP) y terminar siempre por debajo de 5MB. La validación de
+// 5MB se aplica en el backend como defensa en profundidad.
+const MAX_ORIGINAL_SIZE = 30 * 1024 * 1024; // 30MB
 const ACCEPTED_IMAGE_TYPES = ["image/jpeg", "image/png", "image/webp"];
 
 export const locationSchema = z.object({
@@ -21,7 +24,10 @@ export const ticketSchema = z.object({
   file: z
     .custom<FileList>()
     .refine((files) => files && files.length === 1, "Debe adjuntar una imagen del problema")
-    .refine((files) => !files || files.length === 0 || files[0].size <= MAX_FILE_SIZE, "El archivo no debe superar los 5MB")
+    .refine(
+      (files) => !files || files.length === 0 || files[0].size <= MAX_ORIGINAL_SIZE,
+      "La imagen no debe superar los 30MB"
+    )
     .refine(
       (files) => !files || files.length === 0 || ACCEPTED_IMAGE_TYPES.includes(files[0].type),
       "Solo se aceptan formatos .jpg, .png y .webp"

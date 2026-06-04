@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useForm, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { motion, AnimatePresence } from "framer-motion";
@@ -6,6 +6,8 @@ import toast from "react-hot-toast";
 import { ticketSchema, type TicketFormData } from "../schema";
 import { MapModal } from "./MapModal";
 import { useCreateTicket } from "../hooks";
+import { useOptimizedImage } from "../hooks/useOptimizedImage";
+import { formatBytes } from "../../../utils/optimizeImage";
 
 const errorVariants = {
   hidden: { opacity: 0, height: 0, overflow: "hidden" },
@@ -53,8 +55,16 @@ interface TicketFormProps {
 export const TicketForm: React.FC<TicketFormProps> = ({ isDarkMode, onSuccess }) => {
   const [isMapOpen, setIsMapOpen] = useState(false);
   const createTicket = useCreateTicket();
-
-  const { register, handleSubmit, control, setValue, watch, reset, formState: { errors } } = useForm<TicketFormData>({
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const {
+    register,
+    handleSubmit,
+    control,
+    setValue,
+    watch,
+    reset,
+    formState: { errors },
+  } = useForm<TicketFormData>({
     resolver: zodResolver(ticketSchema),
     defaultValues: { municipality_or_destination: "Intendencia de Lavalleja", category: "camineria_rural", location: { lat: 0, lng: 0 } },
   });
@@ -62,11 +72,76 @@ export const TicketForm: React.FC<TicketFormProps> = ({ isDarkMode, onSuccess })
   const location = watch("location");
   const hasLocation = location && (location.lat !== 0 || location.lng !== 0);
 
+  const {
+    isOptimizing,
+    error: imageOptimizationError,
+    result: imageOptimizationResult,
+    originalFile,
+    optimizedFile,
+    statusMessage,
+    setOriginalFile,
+    reset: resetImage,
+  } = useOptimizedImage();
+
+  // Inyectamos el ref al input file para poder limpiarlo tras un envío exitoso.
+  const { ref: rhfRef, ...fileReg } = register("file");
+  const fileInputRefCallback = (el: HTMLInputElement | null) => {
+    rhfRef(el);
+    fileInputRef.current = el;
+  };
+
+  // Limpia el estado de optimización al desmontar el formulario.
+  useEffect(() => {
+    return () => {
+      resetImage();
+    };
+  }, [resetImage]);
+
+  const onFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    fileReg.onChange(event);
+    const next = event.target.files?.[0] ?? null;
+    if (!next) {
+      setOriginalFile(null);
+      // Reconstruimos un FileList vacío para mantener la coherencia con RHF.
+      setValue("file", new DataTransfer().files, { shouldValidate: true });
+      return;
+    }
+    // Sincronizamos el FileList del form con el archivo original seleccionado
+    // (las validaciones de tipo y 30MB se aplican sobre el original).
+    const dt = new DataTransfer();
+    dt.items.add(next);
+    setValue("file", dt.files, { shouldValidate: true });
+    setOriginalFile(next);
+  };
+
   const onSubmit = async (data: TicketFormData) => {
+    if (isOptimizing) {
+      toast.error("Esperá a que la imagen termine de procesarse.");
+      return;
+    }
     try {
-      const result = await createTicket.mutateAsync(data);
-      toast.success(`Reporte enviado. Código: ${result.tracking_code}`);
+      // Si la optimización produjo un archivo, lo usamos. Si no, usamos el
+      // original. Mantenemos intacto el campo `file` y el endpoint del backend.
+      const finalFile = optimizedFile ?? originalFile ?? data.file?.[0];
+      if (!finalFile) {
+        toast.error("Debe adjuntar una imagen del problema.");
+        return;
+      }
+
+      const dt = new DataTransfer();
+      dt.items.add(finalFile);
+      const payload: TicketFormData = {
+        ...data,
+        file: dt.files,
+      };
+
+      const result = await createTicket.mutateAsync(payload);
+      toast.success(`Tu reporte fue enviado correctamente. Codigo: ${result.tracking_code}`);
       reset();
+      resetImage();
+      if (fileInputRef.current) {
+        fileInputRef.current.value = "";
+      }
       onSuccess?.(result.tracking_code);
     } catch (err: unknown) {
       const axiosErr = err as { response?: { data?: { error?: string } } };
@@ -98,9 +173,12 @@ export const TicketForm: React.FC<TicketFormProps> = ({ isDarkMode, onSuccess })
     },
   };
 
+  const isSubmittingForm = createTicket.isPending;
+  const isSubmitDisabled = isSubmittingForm || isOptimizing;
+
   return (
     <>
-      <form onSubmit={handleSubmit(onSubmit)} className="space-y-10">
+      <form onSubmit={handleSubmit(onSubmit)} className="space-y-10" noValidate>
 
         {/* Banner Informativo */}
         <AnimatedSection>
@@ -250,21 +328,88 @@ export const TicketForm: React.FC<TicketFormProps> = ({ isDarkMode, onSuccess })
               {...focusMotion}
               type="file"
               accept="image/jpeg,image/png,image/webp"
-              {...register("file")}
+              ref={fileInputRefCallback}
+              name={fileReg.name}
+              onBlur={fileReg.onBlur}
+              onChange={onFileChange}
+              disabled={isOptimizing}
+              aria-busy={isOptimizing}
+              aria-describedby="image-help image-status"
               className={`w-full px-4 py-3 rounded-xl border-2 border-dashed transition-all outline-none cursor-pointer
-                file:mr-4 file:py-1.5 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold ${
+                file:mr-4 file:py-1.5 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold disabled:opacity-60 disabled:cursor-wait ${
                 isDarkMode
                   ? "border-[#2A2A2A] bg-[#1A1A1A] text-white/40 file:bg-blue-950/60 file:text-blue-400 hover:file:bg-blue-950/80 focus:border-blue-500"
                   : "border-gray-200 bg-gray-50 text-gray-500 file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100 focus:border-blue-400"
               }`}
             />
-            <p className={`text-[11px] mt-1.5 ml-0.5 ${isDarkMode ? "text-white/25" : "text-gray-400"}`}>
-              JPG, PNG o WEBP. Maximo 5MB.
+            <p id="image-help" className={`text-[11px] mt-1.5 ml-0.5 ${isDarkMode ? "text-white/25" : "text-gray-400"}`}>
+              JPG, PNG o WEBP. Maximo 30MB; la imagen se optimiza automaticamente antes de enviarla.
             </p>
+
+            {/* Estado de la imagen seleccionada / optimización */}
+            <div id="image-status" aria-live="polite" className="mt-2 space-y-1.5">
+              <AnimatePresence>
+                {originalFile && !isOptimizing && !imageOptimizationError && (
+                  <motion.p
+                    key="selected-name"
+                    variants={errorVariants}
+                    initial="hidden"
+                    animate="visible"
+                    exit="exit"
+                    className={`text-[11px] font-medium flex items-center gap-1.5 ${isDarkMode ? "text-white/45" : "text-gray-500"}`}
+                  >
+                    <svg className="w-3.5 h-3.5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
+                    </svg>
+                    <span className="truncate max-w-[60ch]">{originalFile.name}</span>
+                    <span className={`${isDarkMode ? "text-white/30" : "text-gray-400"}`}>· {formatBytes(originalFile.size, 1)}</span>
+                  </motion.p>
+                )}
+
+                {isOptimizing && (
+                  <motion.p
+                    key="optimizing"
+                    variants={errorVariants}
+                    initial="hidden"
+                    animate="visible"
+                    exit="exit"
+                    className={`text-[11px] font-semibold flex items-center gap-2 ${isDarkMode ? "text-blue-400" : "text-blue-600"}`}
+                  >
+                    <span className="inline-block w-3.5 h-3.5 border-2 border-current border-t-transparent rounded-full animate-spin" aria-hidden="true" />
+                    Optimizando imagen para reducir el tiempo de envio...
+                  </motion.p>
+                )}
+
+                {imageOptimizationResult && !isOptimizing && (
+                  <motion.p
+                    key="result"
+                    variants={errorVariants}
+                    initial="hidden"
+                    animate="visible"
+                    exit="exit"
+                    className={`text-[11px] font-semibold flex items-center gap-1.5 ${isDarkMode ? "text-emerald-400" : "text-emerald-600"}`}
+                  >
+                    <svg className="w-3.5 h-3.5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
+                    </svg>
+                    {statusMessage}
+                  </motion.p>
+                )}
+              </AnimatePresence>
+            </div>
+
             <AnimatePresence>
-              {errors.file && (
-                <motion.p variants={errorVariants} initial="hidden" animate="visible" exit="exit" className={errClass}>
-                  {errors.file.message as string}
+              {(errors.file || imageOptimizationError) && (
+                <motion.p
+                  key="file-err"
+                  variants={errorVariants}
+                  initial="hidden"
+                  animate="visible"
+                  exit="exit"
+                  className={errClass}
+                  role="alert"
+                >
+                  {imageOptimizationError ?? (errors.file?.message as string)}
                 </motion.p>
               )}
             </AnimatePresence>
@@ -304,14 +449,38 @@ export const TicketForm: React.FC<TicketFormProps> = ({ isDarkMode, onSuccess })
               )}
             </AnimatePresence>
           </div>
+
+          {/* Mensaje de progreso del envío */}
+          <AnimatePresence>
+            {isSubmittingForm && (
+              <motion.p
+                key="sending"
+                variants={errorVariants}
+                initial="hidden"
+                animate="visible"
+                exit="exit"
+                role="status"
+                className={`text-[12px] font-semibold flex items-center gap-2 ${isDarkMode ? "text-blue-400" : "text-blue-600"}`}
+              >
+                <span className="inline-block w-3.5 h-3.5 border-2 border-current border-t-transparent rounded-full animate-spin" aria-hidden="true" />
+                Enviando reporte...
+              </motion.p>
+            )}
+          </AnimatePresence>
+
           <motion.button
-            whileHover={{ scale: 1.01 }}
-            whileTap={{ scale: 0.98 }}
-            disabled={createTicket.isPending}
+            whileHover={!isSubmitDisabled ? { scale: 1.01 } : undefined}
+            whileTap={!isSubmitDisabled ? { scale: 0.98 } : undefined}
+            disabled={isSubmitDisabled}
             type="submit"
+            aria-busy={isSubmitDisabled}
             className="w-full py-4 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-xl transition-colors disabled:opacity-40 disabled:cursor-not-allowed text-base tracking-wide uppercase shadow-lg shadow-blue-900/20"
           >
-            {createTicket.isPending ? "Enviando..." : "Enviar Reporte"}
+            {isOptimizing
+              ? "Procesando imagen..."
+              : isSubmittingForm
+                ? "Enviando..."
+                : "Enviar Reporte"}
           </motion.button>
         </AnimatedSection>
       </form>
