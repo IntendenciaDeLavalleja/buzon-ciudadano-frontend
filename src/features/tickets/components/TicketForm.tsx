@@ -5,9 +5,10 @@ import { motion, AnimatePresence } from "framer-motion";
 import toast from "react-hot-toast";
 import { ticketSchema, type TicketFormData } from "../schema";
 import { MapModal } from "./MapModal";
-import { useCreateTicket } from "../hooks";
+import { useCreateTicket, type TicketSubmission } from "../hooks";
+import { useNumericCaptcha } from "../hooks/useNumericCaptcha";
 import { useOptimizedImage } from "../hooks/useOptimizedImage";
-import { formatBytes } from "../../../utils/optimizeImage";
+import { formatBytes, MAX_FINAL_SIZE_BYTES } from "../../../utils/optimizeImage";
 
 const errorVariants = {
   hidden: { opacity: 0, height: 0, overflow: "hidden" },
@@ -55,6 +56,7 @@ interface TicketFormProps {
 export const TicketForm: React.FC<TicketFormProps> = ({ isDarkMode, onSuccess }) => {
   const [isMapOpen, setIsMapOpen] = useState(false);
   const createTicket = useCreateTicket();
+  const captcha = useNumericCaptcha();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const {
     register,
@@ -98,25 +100,35 @@ export const TicketForm: React.FC<TicketFormProps> = ({ isDarkMode, onSuccess })
   }, [resetImage]);
 
   const onFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
-    fileReg.onChange(event);
     const next = event.target.files?.[0] ?? null;
-    if (!next) {
-      setOriginalFile(null);
-      // Reconstruimos un FileList vacío para mantener la coherencia con RHF.
-      setValue("file", new DataTransfer().files, { shouldValidate: true });
-      return;
-    }
-    // Sincronizamos el FileList del form con el archivo original seleccionado
-    // (las validaciones de tipo y 30MB se aplican sobre el original).
-    const dt = new DataTransfer();
-    dt.items.add(next);
-    setValue("file", dt.files, { shouldValidate: true });
+    // RHF toma el FileList nativo mediante onChange. setValue sobre un input
+    // file registrado vacía su value; un ref posterior relee el selector vacío
+    // aunque el optimizador todavía conserve la imagen y muestre éxito.
+    void fileReg.onChange(event);
     setOriginalFile(next);
   };
 
   const onSubmit = async (data: TicketFormData) => {
+    if (!captcha.challenge || captcha.loading) {
+      captcha.setError("Cargá una nueva suma antes de enviar.");
+      return;
+    }
+    if (Date.now() >= captcha.challenge.expiresAt) {
+      await captcha.refresh();
+      captcha.setError("La verificación venció. Resolvé la nueva suma; tus datos y tu foto se conservan.");
+      return;
+    }
+    if (!/^[0-9]{1,2}$/.test(captcha.answer.trim())) {
+      captcha.setError("Escribí el resultado numérico de la suma.");
+      document.getElementById("captcha-answer")?.focus();
+      return;
+    }
     if (isOptimizing) {
       toast.error("Esperá a que la imagen termine de procesarse.");
+      return;
+    }
+    if (imageOptimizationError) {
+      toast.error(imageOptimizationError);
       return;
     }
     try {
@@ -127,25 +139,45 @@ export const TicketForm: React.FC<TicketFormProps> = ({ isDarkMode, onSuccess })
         toast.error("Debe adjuntar una imagen del problema.");
         return;
       }
+      if (finalFile.size > MAX_FINAL_SIZE_BYTES) {
+        toast.error("La imagen procesada supera los 5 MB. Seleccioná otra imagen.");
+        return;
+      }
 
       const dt = new DataTransfer();
       dt.items.add(finalFile);
-      const payload: TicketFormData = {
+      const payload: TicketSubmission = {
         ...data,
         file: dt.files,
+        captcha_id: captcha.challenge.id,
+        captcha_answer: captcha.answer.trim(),
       };
 
       const result = await createTicket.mutateAsync(payload);
       toast.success(`Tu reporte fue enviado correctamente. Codigo: ${result.tracking_code}`);
       reset();
       resetImage();
+      void captcha.refresh();
       if (fileInputRef.current) {
         fileInputRef.current.value = "";
       }
       onSuccess?.(result.tracking_code);
     } catch (err: unknown) {
-      const axiosErr = err as { response?: { data?: { error?: string } } };
-      const msg = axiosErr?.response?.data?.error ?? "Error al enviar el reporte. Intente nuevamente.";
+      const axiosErr = err as { code?: string; response?: { status?: number; data?: { error?: string; code?: string } } };
+      if (axiosErr?.response?.data?.code === "captcha_invalid") {
+        await captcha.refresh();
+        captcha.setError("La respuesta es incorrecta o venció. Resolvé la nueva suma; tus datos y tu foto se conservan.");
+      }
+      // No registrar el objeto Axios completo: contiene datos personales y el adjunto.
+      console.error("[tickets] Error al enviar POST /api/tickets", {
+        status: axiosErr?.response?.status,
+        code: axiosErr?.code,
+      });
+      const msg = axiosErr?.response?.data?.error ?? (
+        axiosErr?.code === "ERR_NETWORK"
+          ? "No se pudo conectar con el servidor. Revisá tu conexión e intentá nuevamente."
+          : "Error al enviar el reporte. Intente nuevamente."
+      );
       toast.error(msg);
     }
   };
@@ -174,11 +206,16 @@ export const TicketForm: React.FC<TicketFormProps> = ({ isDarkMode, onSuccess })
   };
 
   const isSubmittingForm = createTicket.isPending;
-  const isSubmitDisabled = isSubmittingForm || isOptimizing;
+  const isSubmitDisabled = isSubmittingForm || isOptimizing || captcha.loading || !captcha.challenge;
 
   return (
     <>
-      <form onSubmit={handleSubmit(onSubmit)} className="space-y-10" noValidate>
+      <form onSubmit={handleSubmit(onSubmit, (invalidFields) => {
+        console.warn("[tickets] Envío bloqueado por validación local", {
+          fields: Object.keys(invalidFields),
+        });
+        toast.error("Revisá los campos marcados antes de enviar el reporte.");
+      })} className="space-y-10" noValidate>
 
         {/* Banner Informativo */}
         <AnimatedSection>
@@ -448,6 +485,23 @@ export const TicketForm: React.FC<TicketFormProps> = ({ isDarkMode, onSuccess })
                 </motion.p>
               )}
             </AnimatePresence>
+          </div>
+
+          <div className="space-y-2" aria-busy={captcha.loading}>
+            <label htmlFor="captcha-answer" className={labelClass}>Verificación numérica *</label>
+            <p id="captcha-question" className={isDarkMode ? "text-white/80" : "text-gray-800"} aria-live="polite">
+              {captcha.loading ? "Cargando verificación..." : captcha.challenge ? `¿Cuánto es ${captcha.challenge.question}?` : "Verificación no disponible"}
+            </p>
+            <input id="captcha-answer" name="captcha_answer" type="text" inputMode="numeric"
+              autoComplete="off" maxLength={2} value={captcha.answer}
+              disabled={captcha.loading || isSubmittingForm || !captcha.challenge}
+              onChange={(event) => { captcha.setAnswer(event.target.value); captcha.setError(null); }}
+              aria-describedby="captcha-question captcha-help captcha-error" aria-invalid={Boolean(captcha.error)}
+              className={inputClass} placeholder="Resultado" />
+            <p id="captcha-help" className={isDarkMode ? "text-white/60 text-sm" : "text-gray-600 text-sm"}>Resolvé la suma para enviar. La verificación dura 10 minutos.</p>
+            <button type="button" onClick={() => void captcha.refresh()} disabled={captcha.loading || isSubmittingForm}
+              className="text-blue-600 underline disabled:opacity-50">Nueva suma</button>
+            <p id="captcha-error" role="alert" className={errClass}>{captcha.error}</p>
           </div>
 
           {/* Mensaje de progreso del envío */}
