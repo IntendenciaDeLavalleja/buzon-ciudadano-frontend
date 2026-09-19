@@ -13,6 +13,8 @@ instance/
 .pytest_cache/
 
 # Node
+test-results/
+playwright-report/
 node_modules/
 dist/
 build/

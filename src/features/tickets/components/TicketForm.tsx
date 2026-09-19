@@ -7,7 +7,7 @@ import { ticketSchema, type TicketFormData } from "../schema";
 import { MapModal } from "./MapModal";
 import { useCreateTicket } from "../hooks";
 import { useOptimizedImage } from "../hooks/useOptimizedImage";
-import { formatBytes } from "../../../utils/optimizeImage";
+import { formatBytes, MAX_FINAL_SIZE_BYTES } from "../../../utils/optimizeImage";
 
 const errorVariants = {
   hidden: { opacity: 0, height: 0, overflow: "hidden" },
@@ -98,19 +98,11 @@ export const TicketForm: React.FC<TicketFormProps> = ({ isDarkMode, onSuccess })
   }, [resetImage]);
 
   const onFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
-    fileReg.onChange(event);
     const next = event.target.files?.[0] ?? null;
-    if (!next) {
-      setOriginalFile(null);
-      // Reconstruimos un FileList vacío para mantener la coherencia con RHF.
-      setValue("file", new DataTransfer().files, { shouldValidate: true });
-      return;
-    }
-    // Sincronizamos el FileList del form con el archivo original seleccionado
-    // (las validaciones de tipo y 30MB se aplican sobre el original).
-    const dt = new DataTransfer();
-    dt.items.add(next);
-    setValue("file", dt.files, { shouldValidate: true });
+    // RHF toma el FileList nativo mediante onChange. setValue sobre un input
+    // file registrado vacía su value; un ref posterior relee el selector vacío
+    // aunque el optimizador todavía conserve la imagen y muestre éxito.
+    void fileReg.onChange(event);
     setOriginalFile(next);
   };
 
@@ -119,12 +111,20 @@ export const TicketForm: React.FC<TicketFormProps> = ({ isDarkMode, onSuccess })
       toast.error("Esperá a que la imagen termine de procesarse.");
       return;
     }
+    if (imageOptimizationError) {
+      toast.error(imageOptimizationError);
+      return;
+    }
     try {
       // Si la optimización produjo un archivo, lo usamos. Si no, usamos el
       // original. Mantenemos intacto el campo `file` y el endpoint del backend.
       const finalFile = optimizedFile ?? originalFile ?? data.file?.[0];
       if (!finalFile) {
         toast.error("Debe adjuntar una imagen del problema.");
+        return;
+      }
+      if (finalFile.size > MAX_FINAL_SIZE_BYTES) {
+        toast.error("La imagen procesada supera los 5 MB. Seleccioná otra imagen.");
         return;
       }
 
@@ -144,8 +144,17 @@ export const TicketForm: React.FC<TicketFormProps> = ({ isDarkMode, onSuccess })
       }
       onSuccess?.(result.tracking_code);
     } catch (err: unknown) {
-      const axiosErr = err as { response?: { data?: { error?: string } } };
-      const msg = axiosErr?.response?.data?.error ?? "Error al enviar el reporte. Intente nuevamente.";
+      const axiosErr = err as { code?: string; response?: { status?: number; data?: { error?: string } } };
+      // No registrar el objeto Axios completo: contiene datos personales y el adjunto.
+      console.error("[tickets] Error al enviar POST /api/tickets", {
+        status: axiosErr?.response?.status,
+        code: axiosErr?.code,
+      });
+      const msg = axiosErr?.response?.data?.error ?? (
+        axiosErr?.code === "ERR_NETWORK"
+          ? "No se pudo conectar con el servidor. Revisá tu conexión e intentá nuevamente."
+          : "Error al enviar el reporte. Intente nuevamente."
+      );
       toast.error(msg);
     }
   };
@@ -178,7 +187,12 @@ export const TicketForm: React.FC<TicketFormProps> = ({ isDarkMode, onSuccess })
 
   return (
     <>
-      <form onSubmit={handleSubmit(onSubmit)} className="space-y-10" noValidate>
+      <form onSubmit={handleSubmit(onSubmit, (invalidFields) => {
+        console.warn("[tickets] Envío bloqueado por validación local", {
+          fields: Object.keys(invalidFields),
+        });
+        toast.error("Revisá los campos marcados antes de enviar el reporte.");
+      })} className="space-y-10" noValidate>
 
         {/* Banner Informativo */}
         <AnimatedSection>
