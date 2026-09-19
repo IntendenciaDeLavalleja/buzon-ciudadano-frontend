@@ -10,14 +10,16 @@ export interface TicketCreateResponse {
 }
 
 export function useCreateTicket() {
-  return useMutation<TicketCreateResponse, Error, TicketFormData>({
-    mutationFn: async (data: TicketFormData) => {
+  return useMutation<TicketCreateResponse, Error, TicketSubmission>({
+    mutationFn: async (data: TicketSubmission) => {
       const formData = new FormData();
       formData.append('municipality_or_destination', data.municipality_or_destination);
       formData.append('category', data.category);
       formData.append('full_name', data.full_name);
       formData.append('email', data.email);
       formData.append('description', data.description);
+      formData.append('captcha_id', data.captcha_id);
+      formData.append('captcha_answer', data.captcha_answer);
       formData.append('location_lat', String(data.location.lat));
       formData.append('location_lng', String(data.location.lng));
       if (data.file && data.file.length > 0) {
@@ -28,3 +30,5 @@ export function useCreateTicket() {
     },
   });
 }
+
+export type TicketSubmission = TicketFormData & { captcha_id: string; captcha_answer: string };

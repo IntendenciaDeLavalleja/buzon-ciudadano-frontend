@@ -12,6 +12,9 @@ async function image(page: Page, name = 'camino.png', width = 20) {
 }
 
 test.beforeEach(async ({ page }) => {
+  await page.route('**/api/captcha', (route) => route.fulfill({
+    json: { id: 'a'.repeat(43), question: '12 + 7', expires_in: 600 },
+  }));
   // All submissions are intercepted, including when inspecting production.
   await page.route('**/api/tickets', (route) => route.fulfill({
     status: 201, contentType: 'application/json',
@@ -28,6 +31,7 @@ async function fillForm(page: Page) {
   await page.locator('.leaflet-container').click({ position: { x: 150, y: 150 } });
   await page.getByRole('button', { name: 'Confirmar Ubicacion' }).click();
   await page.locator('[name="acceptedDataPolicy"]').check();
+  await page.getByLabel('Verificación numérica', { exact: false }).fill('19');
 }
 
 test('preserves the native file selection after optimization and rerenders', async ({ page }) => {
@@ -104,4 +108,45 @@ test('a corrupt image is not sent after processing fails', async ({ page }) => {
   await page.getByRole('button', { name: 'Enviar Reporte', exact: true }).click();
   await expect(page.getByText('El archivo está dañado o no es una imagen válida.', { exact: true })).toHaveCount(2);
   expect(sent).toBe(false);
+});
+
+test('captcha is mandatory locally and included in multipart', async ({ page }) => {
+  await fillForm(page);
+  await page.locator('input[type="file"]').setInputFiles(await image(page));
+  await page.locator('[name="captcha_answer"]').fill('');
+  await page.getByRole('button', { name: 'Enviar Reporte', exact: true }).click();
+  await expect(page.getByText('Escribí el resultado numérico de la suma.')).toBeVisible();
+  await page.locator('[name="captcha_answer"]').fill('19');
+  const request = page.waitForRequest('**/api/tickets');
+  await page.getByRole('button', { name: 'Enviar Reporte', exact: true }).click();
+  const body = (await request).postDataBuffer()!.toString();
+  expect(body).toContain('name="captcha_id"\r\n\r\n' + 'a'.repeat(43));
+  expect(body).toContain('name="captcha_answer"\r\n\r\n19');
+});
+
+test('captcha rejection refreshes only the challenge and retains the report', async ({ page }) => {
+  await fillForm(page);
+  await page.locator('input[type="file"]').setInputFiles(await image(page));
+  await page.route('**/api/tickets', (route) => route.fulfill({
+    status: 400, json: { code: 'captcha_invalid', error: 'Verificación incorrecta' },
+  }));
+  await page.getByRole('button', { name: 'Enviar Reporte', exact: true }).click();
+  await expect(page.getByText(/La respuesta es incorrecta o venció/)).toBeVisible();
+  await expect(page.locator('[name="captcha_answer"]')).toHaveValue('');
+  await expect(page.locator('[name="full_name"]')).toHaveValue('Prueba automatizada');
+  await expect.poll(() => page.locator('input[type="file"]').evaluate((el: HTMLInputElement) => el.files?.[0]?.name)).toBe('camino.png');
+});
+
+test('captcha load failure can be retried without resetting the form', async ({ page }) => {
+  await fillForm(page);
+  await page.route('**/api/captcha', (route) => route.fulfill({ status: 503, json: {} }));
+  await page.getByRole('button', { name: 'Nueva suma' }).click();
+  await expect(page.getByText(/No se pudo cargar la verificación/)).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Enviar Reporte', exact: true })).toBeDisabled();
+  await page.route('**/api/captcha', (route) => route.fulfill({
+    json: { id: 'b'.repeat(43), question: '1 + 2', expires_in: 600 },
+  }));
+  await page.getByRole('button', { name: 'Nueva suma' }).click();
+  await expect(page.getByText('¿Cuánto es 1 + 2?')).toBeVisible();
+  await expect(page.locator('[name="full_name"]')).toHaveValue('Prueba automatizada');
 });
